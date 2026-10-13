@@ -35,5 +35,5 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
-codesign --force --sign - "$APP" >/dev/null
+codesign --force --options runtime --sign - "$APP" >/dev/null
 echo "Built $APP"

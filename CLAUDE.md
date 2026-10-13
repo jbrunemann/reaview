@@ -26,7 +26,8 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
 - `src/folder.rs`: lists images next to the current file (UTType conforms to `public.image`, hidden
   files skipped, Finder order via `localizedStandardCompare:`) and steps through them.
 - `src/info.rs`: status-bar text: Finder "Kind", pixel size (largest image rep), file size.
-- `scripts/bundle.sh`: builds `Reaview.app` with Info.plist (registers as a Viewer for `public.image`).
+- `scripts/bundle.sh`: builds `Reaview.app` with Info.plist (registers as a Viewer for `public.image`),
+  ad-hoc signed with the hardened runtime (not sandboxed: a sandbox would block reading sibling files).
 - `assets/`: app icon.
 
 ## Behaviour and decisions
