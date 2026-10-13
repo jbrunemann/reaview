@@ -35,5 +35,19 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
-codesign --force --options runtime --sign - "$APP" >/dev/null
+# App Sandbox: read-only access to files the user opens, plus folders they grant
+# (kept as security-scoped bookmarks, see src/access.rs).
+ENTITLEMENTS=target/Reaview.entitlements
+cat > "$ENTITLEMENTS" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key><true/>
+	<key>com.apple.security.files.user-selected.read-only</key><true/>
+	<key>com.apple.security.files.bookmarks.app-scope</key><true/>
+</dict>
+</plist>
+PLIST
+codesign --force --options runtime --entitlements "$ENTITLEMENTS" --sign - "$APP" >/dev/null
 echo "Built $APP"

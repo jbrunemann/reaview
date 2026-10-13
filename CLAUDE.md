@@ -27,7 +27,11 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
   files skipped, Finder order via `localizedStandardCompare:`) and steps through them.
 - `src/info.rs`: status-bar text: Finder "Kind", pixel size (largest image rep), file size.
 - `scripts/bundle.sh`: builds `Reaview.app` with Info.plist (registers as a Viewer for `public.image`),
-  ad-hoc signed with the hardened runtime (not sandboxed: a sandbox would block reading sibling files).
+  ad-hoc signed with the hardened runtime and the App Sandbox (read-only user-selected files,
+  app-scope bookmarks).
+- `src/access.rs`: sandbox folder access. A sandboxed app can read only the file it was opened on,
+  so the first ← / → in a folder it can't list shows an Open panel asking for that folder; the grant
+  is stored as a security-scoped bookmark in user defaults and re-activated at launch.
 - `assets/`: app icon.
 
 ## Behaviour and decisions
@@ -44,6 +48,10 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
 - Window title is the file name, subtitle "n of N". The bottom status bar uses the window's content
   border; the zoom label updates from `NSViewBoundsDidChangeNotification` on the clip view, which
   also covers pinch-to-zoom.
+- Unsandboxed (`cargo run`) every folder is listable, so the access prompt never appears. The
+  bundled app is sandboxed: launch it with `open -a target/Reaview.app file`, not by running the
+  binary inside it (the sandbox would block a path passed on the command line). Its defaults and
+  bookmarks live in `~/Library/Containers/net.kaliber.reaview`.
 - Command-line paths are made absolute with `std::path::absolute` (keeps symlink names).
 
 ## Working with objc2 (0.6 / AppKit bindings 0.3)

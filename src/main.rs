@@ -6,6 +6,7 @@
 //! Zoom to Fit use Preview's key equivalents. Unlike Preview, the left and
 //! right arrow keys load the previous and next image in the same folder.
 
+mod access;
 mod folder;
 mod info;
 
@@ -105,6 +106,7 @@ define_class!(
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self, _notification: &NSNotification) {
             self.install_key_monitor();
+            access::restore();
             let path = std::env::args_os().skip(1).map(PathBuf::from).find(|p| p.is_file());
             match path {
                 Some(path) => self.open_path(&path),
@@ -258,7 +260,7 @@ impl AppDelegate {
         scroll_view.setMinMagnification(MIN_MAGNIFICATION);
         scroll_view.setMaxMagnification(MAX_MAGNIFICATION);
         scroll_view.setDrawsBackground(true);
-        scroll_view.setBackgroundColor(&NSColor::windowBackgroundColor());
+        scroll_view.setBackgroundColor(&NSColor::underPageBackgroundColor());
 
         let image_view = NSImageView::initWithFrame(NSImageView::alloc(mtm), NSRect::ZERO);
         image_view.setImageScaling(NSImageScaling::ScaleAxesIndependently);
@@ -394,6 +396,13 @@ impl AppDelegate {
     /// Move `delta` images through the current folder, in Finder order.
     fn step(&self, delta: isize) {
         let Some(current) = self.ivars().current.borrow().clone() else { return };
+        // Sandboxed, only the opened file is readable until the user grants its folder.
+        if let Some(dir) = current.parent() {
+            if !access::can_list(dir) && !access::request(dir, self.mtm()) {
+                NSBeep();
+                return;
+            }
+        }
         let siblings = folder::sibling_images(&current);
         let Some(target) = folder::neighbour(&siblings, &current, delta) else {
             NSBeep();
