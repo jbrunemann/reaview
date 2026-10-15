@@ -10,6 +10,7 @@ cargo build                    # debug build, binary is target/debug/Reaview
 cargo run -- path/to/image.jpg # no path → Open panel
 cargo test                     # folder navigation + status-bar text tests
 ./scripts/bundle.sh            # release build → target/Reaview.app (needed for Finder "Open With")
+UNIVERSAL=1 ./scripts/bundle.sh # same, fat arm64 + x86_64 binary (what CI ships)
 swift scripts/make-icon.swift assets/AppIcon.png   # redraw the icon, then rebuild AppIcon.icns (see below)
 ```
 
@@ -32,7 +33,9 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
 - `src/access.rs`: sandbox folder access. A sandboxed app can read only the file it was opened on,
   so the first ← / → in a folder it can't list shows an Open panel asking for that folder; the grant
   is stored as a security-scoped bookmark in user defaults and re-activated at launch.
-- `assets/`: app icon.
+- `.github/workflows/build.yml`: CI. Tests, builds the universal app with `UNIVERSAL=1`, uploads
+  `Reaview-universal.zip` as an artifact, and attaches it to a GitHub release on `v*` tags.
+- `assets/`: app icon. `docs/screenshot.png`: README screenshot.
 
 ## Behaviour and decisions
 
@@ -68,7 +71,9 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
 ## Testing limits
 
 This environment cannot send keystrokes (osascript has no Accessibility access) or take screenshots
-(no Screen Recording), so GUI behaviour must be checked by the user. Keep logic in testable modules
+(no Screen Recording), so GUI behaviour must be checked by the user. Exception: an app can capture its
+*own* window in-process with `CGWindowListCreateImage(CGRectNull, kCGWindowListOptionIncludingWindow, windowNumber, kCGWindowImageBestResolution)`
+without any permission (this made `docs/screenshot.png`). `screencapture` from the shell still fails. Keep logic in testable modules
 (`folder.rs`, `info.rs`) and smoke-test that the app launches.
 
 ## Reverse-engineering Preview.app with REA

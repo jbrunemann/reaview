@@ -1,12 +1,20 @@
 #!/bin/sh
 # Build Reaview.app so Finder "Open With" and drag-to-Dock work.
+# UNIVERSAL=1 builds a fat arm64 + x86_64 binary (needs both rustup targets).
 set -eu
 cd "$(dirname "$0")/.."
-cargo build --release
 APP=target/Reaview.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/release/Reaview "$APP/Contents/MacOS/Reaview"
+if [ "${UNIVERSAL:-0}" = 1 ]; then
+	cargo build --release --target aarch64-apple-darwin
+	cargo build --release --target x86_64-apple-darwin
+	lipo -create -output "$APP/Contents/MacOS/Reaview" \
+		target/aarch64-apple-darwin/release/Reaview target/x86_64-apple-darwin/release/Reaview
+else
+	cargo build --release
+	cp target/release/Reaview "$APP/Contents/MacOS/Reaview"
+fi
 cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
