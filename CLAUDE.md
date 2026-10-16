@@ -54,7 +54,7 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
 - Unsandboxed (`cargo run`) every folder is listable, so the access prompt never appears. The
   bundled app is sandboxed: launch it with `open -a target/Reaview.app file`, not by running the
   binary inside it (the sandbox would block a path passed on the command line). Its defaults and
-  bookmarks live in `~/Library/Containers/net.kaliber.reaview`.
+  bookmarks live in `~/Library/Containers/dev.reaview.ai`.
 - Command-line paths are made absolute with `std::path::absolute` (keeps symlink names).
 
 ## Working with objc2 (0.6 / AppKit bindings 0.3)

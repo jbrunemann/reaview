@@ -22,7 +22,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key><string>Reaview</string>
-	<key>CFBundleIdentifier</key><string>net.kaliber.reaview</string>
+	<key>CFBundleIdentifier</key><string>dev.reaview.ai</string>
 	<key>CFBundleName</key><string>Reaview</string>
 	<key>CFBundleDisplayName</key><string>Reaview</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>

@@ -18,6 +18,52 @@ Download `Reaview-universal.zip` (Apple Silicon and Intel) from the
 The app is ad-hoc signed, not notarized, so the first launch needs a right-click, **Open**.
 Or clear the quarantine flag: `xattr -dr com.apple.quarantine Reaview.app`.
 
+## Make it the default image viewer
+
+macOS stores the default app per file type, so there is no single switch for all images.
+The bundle ID is `dev.reaview.ai`. Reaview registers as a viewer for `public.image`, so it shows
+up in Finder's **Open With** menu.
+
+**In Finder**, one type at a time: select an image, press ⌘I, choose Reaview under
+**Open with:**, and click **Change All…**. Repeat for each format you use.
+
+**With [`duti`](https://github.com/moretension/duti)**, all common types at once:
+
+```sh
+brew install duti
+for t in \
+  public.jpeg public.png public.heic public.heif public.avif \
+  com.compuserve.gif public.tiff org.webmproject.webp \
+  com.apple.icns com.microsoft.bmp com.microsoft.ico \
+  public.jpeg-2000 public.jpeg-xl \
+  public.camera-raw-image com.adobe.raw-image \
+  com.adobe.photoshop-image com.truevision.tga-image \
+  com.ilm.openexr-image com.apple.pict com.sgi.sgi-image public.radiance; do
+  duti -s dev.reaview.ai $t all
+done
+duti -x jpg   # check: should list Reaview
+```
+
+If the app was just installed or replaced and `duti` doesn't see it, register it first:
+
+```sh
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/Reaview.app
+```
+
+Notes:
+
+- SVG (`public.svg-image`) and PDF are left out on purpose. Add `public.svg-image` to the list if
+  you want Reaview to open SVGs.
+- `public.camera-raw-image` covers most RAW formats. If a RAW file still opens elsewhere, set it
+  by extension: `duti -s dev.reaview.ai .cr2 all`.
+- The app is sandboxed, so the first ← / → in a folder asks for access to that folder. The grant
+  is remembered.
+
+**Restore Preview**: run the same loop with Preview's bundle ID, `com.apple.Preview`
+(for example `duti -s com.apple.Preview $t all`), and reset any extensions you set by hand, such as
+`duti -s com.apple.Preview .cr2 all`. Or use **Change All…** in Finder again. To remove Reaview,
+restore Preview first, then delete `/Applications/Reaview.app`.
+
 ## Build
 
 ```sh
