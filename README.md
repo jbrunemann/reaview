@@ -18,6 +18,17 @@ Download `Reaview-universal.zip` (Apple Silicon and Intel) from the
 The app is ad-hoc signed, not notarized, so the first launch needs a right-click, **Open**.
 Or clear the quarantine flag: `xattr -dr com.apple.quarantine Reaview.app`.
 
+## Listing from another app
+
+← / → follow Finder name order, without hidden files, unless Reaview is started with options.
+Another app can ask for `--sort name|size|date` (modified) with `--asc` or `--desc`, `--plain`
+(names compared without numbers by value, "img10" before "img2") and `--hidden` (files starting
+with a dot). Arguments only apply to a fresh process, so start a new instance:
+
+```sh
+open -n -a Reaview photo.jpg --args --sort date --desc --plain --hidden
+```
+
 ## Make it the default image viewer
 
 macOS stores the default app per file type, so there is no single switch for all images.

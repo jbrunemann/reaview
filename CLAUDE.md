@@ -25,7 +25,8 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
   delegate and the target for every menu action. `Viewer` holds the window, scroll view, image view
   and the two status-bar labels. `CenteringClipView` centres images smaller than the viewport.
 - `src/folder.rs`: lists images next to the current file (UTType conforms to `public.image`, hidden
-  files skipped, Finder order via `localizedStandardCompare:`) and steps through them.
+  files skipped unless `--hidden`, Finder order via `localizedStandardCompare:` or by size/date), parses the listing
+  arguments (`Listing`), and steps through them. A deleted current file is placed from the previous listing.
 - `src/info.rs`: status-bar text: Finder "Kind", pixel size (largest image rep), file size.
 - `scripts/bundle.sh`: builds `Reaview.app` with Info.plist (registers as a Viewer for `public.image`),
   ad-hoc signed with the hardened runtime and the App Sandbox (read-only user-selected files,
@@ -41,8 +42,14 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
 
 - Arrow keys are caught by a local `NSEvent` key-down monitor, only for the viewer window and only
   without modifiers. They take priority over scrolling when zoomed in.
+- Listing: Finder name order, no hidden files, by default. `--sort name|size|date` (modification date)
+  with `--asc` / `--desc` changes the order, `--plain` compares names without numbers by value
+  (`localizedCaseInsensitiveCompare:`) and `--hidden` includes dot files, so another app (macsplorer)
+  can make ← / → match its own listing. Ties fall back to name order. Arguments are read once at
+  launch, so a caller must start a new instance
+  (`open -n -a Reaview file --args --sort date --desc --plain --hidden`); a running Reaview ignores them.
 - Navigation stops at either end with a beep (no wrap). The folder is re-read on every step; if the
-  current file was deleted, stepping continues from where it used to sort.
+  current file was deleted, stepping continues from where it was in the previous listing.
 - Decoding is `NSImage` (ImageIO), so every format Preview opens works.
 - Zoom is `NSScrollView` magnification. "Sticky zoom to fit" (as in Preview): the image refits on
   window resize until the user zooms manually. Fit never enlarges past 100%.

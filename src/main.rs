@@ -86,6 +86,11 @@ struct Viewer {
 struct AppState {
     viewer: OnceCell<Viewer>,
     current: RefCell<Option<PathBuf>>,
+    // Which images are listed, and in what order (`--sort`, `--asc`, `--desc`,
+    // `--plain`, `--hidden` on the command line), and the listing it gave when
+    // the current image was loaded.
+    listing: Cell<folder::Listing>,
+    siblings: RefCell<Vec<PathBuf>>,
     image_size: Cell<NSSize>,
     // Preview's "sticky zoom to fit": stays fitted while the window resizes,
     // until the user zooms explicitly.
@@ -215,8 +220,8 @@ define_class!(
 );
 
 impl AppDelegate {
-    fn new(mtm: MainThreadMarker) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(AppState::default());
+    fn new(mtm: MainThreadMarker, listing: folder::Listing) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(AppState { listing: Cell::new(listing), ..AppState::default() });
         unsafe { msg_send![super(this), init] }
     }
 
@@ -393,7 +398,7 @@ impl AppDelegate {
         viewer.window.makeKeyAndOrderFront(None);
     }
 
-    /// Move `delta` images through the current folder, in Finder order.
+    /// Move `delta` images through the current folder, in the chosen order.
     fn step(&self, delta: isize) {
         let Some(current) = self.ivars().current.borrow().clone() else { return };
         // Sandboxed, only the opened file is readable until the user grants its folder.
@@ -403,8 +408,9 @@ impl AppDelegate {
                 return;
             }
         }
-        let siblings = folder::sibling_images(&current);
-        let Some(target) = folder::neighbour(&siblings, &current, delta) else {
+        let siblings = folder::sibling_images(&current, self.ivars().listing.get());
+        let previous = self.ivars().siblings.borrow().clone();
+        let Some(target) = folder::neighbour(&siblings, &current, delta, &previous) else {
             NSBeep();
             return;
         };
@@ -431,12 +437,13 @@ impl AppDelegate {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         viewer.window.setTitle(&NSString::from_str(&name));
         viewer.window.setRepresentedURL(Some(&url));
-        let siblings = folder::sibling_images(path);
+        let siblings = folder::sibling_images(path, self.ivars().listing.get());
         let subtitle = match siblings.iter().position(|p| p == path) {
             Some(index) => format!("{} of {}", index + 1, siblings.len()),
             None => String::new(),
         };
         viewer.window.setSubtitle(&NSString::from_str(&subtitle));
+        *self.ivars().siblings.borrow_mut() = siblings;
 
         *self.ivars().current.borrow_mut() = Some(path.to_path_buf());
         true
@@ -605,7 +612,7 @@ fn main() {
         unsafe { app.setApplicationIconImage(Some(&icon)) };
     }
 
-    let delegate = AppDelegate::new(mtm);
+    let delegate = AppDelegate::new(mtm, folder::Listing::from_args(std::env::args_os().skip(1)));
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     app.run();
 }
