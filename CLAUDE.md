@@ -34,6 +34,12 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
 - `src/access.rs`: sandbox folder access. A sandboxed app can read only the file it was opened on,
   so the first ← / → in a folder it can't list shows an Open panel asking for that folder; the grant
   is stored as a security-scoped bookmark in user defaults and re-activated at launch.
+- `src/update.rs`: "Check for Updates…" (app menu). Asks GitHub's latest-release JSON (or a plain
+  `{"version","url"}` file) through `NSURLSession`, compares versions (`Version`, ported from macsplorer's
+  `update-check` crate, which uses `curl` instead) and the result is shown in an `NSAlert` with a button
+  to the download page. Needs the `com.apple.security.network.client` entitlement. Nothing is ever
+  checked without the menu click. The address is `DEFAULT_SOURCE` unless the user default `UpdateURL`
+  is set (`defaults write dev.reaview.ai UpdateURL <address>`). The compared version is `CARGO_PKG_VERSION`.
 - `.github/workflows/build.yml`: CI. Tests, builds the universal app with `UNIVERSAL=1`, uploads
   `Reaview-universal.zip` as an artifact, and attaches it to a GitHub release on `v*` tags.
 - `assets/`: app icon. `docs/screenshot.png`: README screenshot.

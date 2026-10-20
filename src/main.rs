@@ -9,6 +9,7 @@
 mod access;
 mod folder;
 mod info;
+mod update;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::path::{Path, PathBuf};
@@ -19,7 +20,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, sel, AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSApplicationDelegate, NSBackingStoreType,
+    NSAlert, NSAlertFirstButtonReturn, NSWorkspace, NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSApplicationDelegate, NSBackingStoreType,
     NSBeep, NSClipView, NSColor, NSEvent, NSEventMask, NSEventModifierFlags, NSFont,
     NSFontWeightRegular, NSImage, NSLineBreakMode, NSTextField, NSView, NSViewBoundsDidChangeNotification,
     NSImageScaling, NSImageView, NSMenu, NSMenuItem, NSModalResponseOK, NSOpenPanel,
@@ -95,6 +96,8 @@ struct AppState {
     // Preview's "sticky zoom to fit": stays fitted while the window resizes,
     // until the user zooms explicitly.
     sticky_fit: Cell<bool>,
+    // An update check is in flight; the menu item does nothing meanwhile.
+    checking_updates: Cell<bool>,
     key_monitor: OnceCell<Retained<AnyObject>>,
 }
 
@@ -110,8 +113,7 @@ define_class!(
     unsafe impl NSApplicationDelegate for AppDelegate {
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self, _notification: &NSNotification) {
-            self.install_key_monitor();
-            access::restore();
+            self.install_key_monitor();            access::restore();
             let path = std::env::args_os().skip(1).map(PathBuf::from).find(|p| p.is_file());
             match path {
                 Some(path) => self.open_path(&path),
@@ -151,6 +153,19 @@ define_class!(
         #[unsafe(method(openDocument:))]
         fn open_document(&self, _sender: Option<&AnyObject>) {
             self.run_open_panel(false);
+        }
+
+        #[unsafe(method(checkForUpdates:))]
+        fn check_for_updates(&self, _sender: Option<&AnyObject>) {
+            if self.ivars().checking_updates.replace(true) {
+                return;
+            }
+            let mtm = self.mtm();
+            let this = self.retain();
+            update::check(&update::source(), env!("CARGO_PKG_VERSION"), move |result| {
+                this.ivars().checking_updates.set(false);
+                show_update_result(mtm, result);
+            });
         }
 
         #[unsafe(method(goToPreviousImage:))]
@@ -515,6 +530,37 @@ fn NSScreenMain(mtm: MainThreadMarker) -> Option<Retained<objc2_app_kit::NSScree
     objc2_app_kit::NSScreen::mainScreen(mtm)
 }
 
+/// Tells the user what "Check for Updates…" found; offers the download page when there is a newer release.
+fn show_update_result(mtm: MainThreadMarker, result: Result<update::Status, update::Error>) {
+    let version = env!("CARGO_PKG_VERSION");
+    let alert = NSAlert::new(mtm);
+    let mut page = None;
+    match result {
+        Ok(update::Status::Available(release)) => {
+            alert.setMessageText(&NSString::from_str(&format!("Reaview {} is available", release.version)));
+            alert.setInformativeText(&NSString::from_str(&format!("You have version {version}.")));
+            page = release.page;
+        }
+        Ok(update::Status::UpToDate { .. }) => {
+            alert.setMessageText(&NSString::from_str("Reaview is up to date"));
+            alert.setInformativeText(&NSString::from_str(&format!("You have the latest version, {version}.")));
+        }
+        Err(error) => {
+            alert.setMessageText(&NSString::from_str("Couldn’t check for updates"));
+            alert.setInformativeText(&NSString::from_str(&format!("{}.", error.to_string().trim_end_matches('.'))));
+        }
+    }
+    alert.addButtonWithTitle(&NSString::from_str(if page.is_some() { "Open Download Page" } else { "OK" }));
+    if page.is_some() {
+        alert.addButtonWithTitle(&NSString::from_str("Not Now"));
+    }
+    if alert.runModal() == NSAlertFirstButtonReturn {
+        if let Some(url) = page.and_then(|p| NSURL::URLWithString(&NSString::from_str(&p))) {
+            NSWorkspace::sharedWorkspace().openURL(&url);
+        }
+    }
+}
+
 fn status_label(
     mtm: MainThreadMarker,
     frame: NSRect,
@@ -571,6 +617,7 @@ fn build_main_menu(mtm: MainThreadMarker) -> Retained<NSMenu> {
     let main = NSMenu::new(mtm);
     main.addItem(&submenu(mtm, APP_NAME, &[
         menu_item(mtm, &format!("About {APP_NAME}"), Some(sel!(orderFrontStandardAboutPanel:)), "", none),
+        menu_item(mtm, "Check for Updates…", Some(sel!(checkForUpdates:)), "", none),
         NSMenuItem::separatorItem(mtm),
         menu_item(mtm, &format!("Hide {APP_NAME}"), Some(sel!(hide:)), "h", cmd),
         NSMenuItem::separatorItem(mtm),

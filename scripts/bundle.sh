@@ -27,7 +27,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundleDisplayName</key><string>Reaview</string>
 	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
-	<key>CFBundleShortVersionString</key><string>0.1.0</string>
+	<key>CFBundleShortVersionString</key><string>0.2.0</string>
 	<key>CFBundleVersion</key><string>1</string>
 	<key>LSMinimumSystemVersion</key><string>11.0</string>
 	<key>NSHighResolutionCapable</key><true/>
@@ -44,7 +44,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 # App Sandbox: read-only access to files the user opens, plus folders they grant
-# (kept as security-scoped bookmarks, see src/access.rs).
+# (kept as security-scoped bookmarks, see src/access.rs), and outgoing network
+# connections for "Check for Updates…" (see src/update.rs).
 ENTITLEMENTS=target/Reaview.entitlements
 cat > "$ENTITLEMENTS" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -54,6 +55,7 @@ cat > "$ENTITLEMENTS" <<'PLIST'
 	<key>com.apple.security.app-sandbox</key><true/>
 	<key>com.apple.security.files.user-selected.read-only</key><true/>
 	<key>com.apple.security.files.bookmarks.app-scope</key><true/>
+	<key>com.apple.security.network.client</key><true/>
 </dict>
 </plist>
 PLIST
