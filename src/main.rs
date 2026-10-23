@@ -21,7 +21,7 @@ use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{define_class, msg_send, sel, AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSWorkspace, NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSApplicationDelegate, NSBackingStoreType,
-    NSBeep, NSClipView, NSColor, NSEvent, NSEventMask, NSEventModifierFlags, NSFont,
+    NSBeep, NSClipView, NSColor, NSCursor, NSEvent, NSEventMask, NSEventModifierFlags, NSEventType, NSFont,
     NSFontWeightRegular, NSImage, NSLineBreakMode, NSTextField, NSView, NSViewBoundsDidChangeNotification,
     NSImageScaling, NSImageView, NSMenu, NSMenuItem, NSModalResponseOK, NSOpenPanel,
     NSPasteboard, NSPasteboardTypeString, NSPasteboardWriting, NSScrollView,
@@ -41,6 +41,9 @@ const KEY_RIGHT_ARROW: u16 = 124;
 const MIN_MAGNIFICATION: f64 = 0.02;
 const MAX_MAGNIFICATION: f64 = 32.0;
 const ZOOM_STEP: f64 = 1.25;
+// Zoom per scroll unit with ⌘ or ⌥ held: a trackpad reports points, a wheel reports lines.
+const SCROLL_ZOOM_PRECISE: f64 = 0.01;
+const SCROLL_ZOOM_LINES: f64 = 0.1;
 const STATUS_BAR_HEIGHT: f64 = 24.0;
 
 // A clip view that centres the document when it is smaller than the viewport,
@@ -52,6 +55,14 @@ define_class!(
     struct CenteringClipView;
 
     impl CenteringClipView {
+        // An open hand while the image is bigger than the window, i.e. can be dragged.
+        #[unsafe(method(resetCursorRects))]
+        fn reset_cursor_rects(&self) {
+            if self.is_pannable() {
+                self.addCursorRect_cursor(self.visibleRect(), &NSCursor::openHandCursor());
+            }
+        }
+
         #[unsafe(method(constrainBoundsRect:))]
         fn constrain_bounds_rect(&self, proposed: NSRect) -> NSRect {
             let mut rect: NSRect = unsafe { msg_send![super(self), constrainBoundsRect: proposed] };
@@ -70,6 +81,14 @@ define_class!(
 );
 
 impl CenteringClipView {
+    /// Whether part of the document is outside the visible area.
+    fn is_pannable(&self) -> bool {
+        let Some(document) = self.documentView() else { return false };
+        let size = document.frame().size;
+        let visible = self.bounds().size;
+        size.width > visible.width + 0.5 || size.height > visible.height + 0.5
+    }
+
     fn new(mtm: MainThreadMarker) -> Retained<Self> {
         unsafe { msg_send![Self::alloc(mtm), init] }
     }
@@ -96,9 +115,11 @@ struct AppState {
     // Preview's "sticky zoom to fit": stays fitted while the window resizes,
     // until the user zooms explicitly.
     sticky_fit: Cell<bool>,
+    // A drag that moves the image is in progress.
+    panning: Cell<bool>,
     // An update check is in flight; the menu item does nothing meanwhile.
     checking_updates: Cell<bool>,
-    key_monitor: OnceCell<Retained<AnyObject>>,
+    event_monitor: OnceCell<Retained<AnyObject>>,
 }
 
 define_class!(
@@ -113,7 +134,7 @@ define_class!(
     unsafe impl NSApplicationDelegate for AppDelegate {
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self, _notification: &NSNotification) {
-            self.install_key_monitor();            access::restore();
+            self.install_event_monitor();
             let path = std::env::args_os().skip(1).map(PathBuf::from).find(|p| p.is_file());
             match path {
                 Some(path) => self.open_path(&path),
@@ -337,7 +358,7 @@ impl AppDelegate {
         Viewer { window, scroll_view, image_view, info_label, zoom_label }
     }
 
-    fn install_key_monitor(&self) {
+    fn install_event_monitor(&self) {
         let delegate: Retained<Self> = self.retain();
         let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
             let event_ref = unsafe { event.as_ref() };
@@ -350,8 +371,26 @@ impl AppDelegate {
                     | NSEventModifierFlags::Option
                     | NSEventModifierFlags::Control
                     | NSEventModifierFlags::Shift);
-            if ours && modifiers.is_empty() {
-                match event_ref.keyCode() {
+            let panning = delegate.ivars().panning.get();
+            match event_ref.r#type() {
+                NSEventType::ScrollWheel
+                    if ours && (modifiers == NSEventModifierFlags::Command || modifiers == NSEventModifierFlags::Option) =>
+                {
+                    delegate.zoom_with_scroll(event_ref);
+                    return std::ptr::null_mut();
+                }
+                NSEventType::LeftMouseDown if ours && modifiers.is_empty() && delegate.begin_pan(event_ref) => {
+                    return std::ptr::null_mut();
+                }
+                NSEventType::LeftMouseDragged if panning => {
+                    delegate.pan(event_ref);
+                    return std::ptr::null_mut();
+                }
+                NSEventType::LeftMouseUp if panning => {
+                    delegate.end_pan();
+                    return std::ptr::null_mut();
+                }
+                NSEventType::KeyDown if ours && modifiers.is_empty() => match event_ref.keyCode() {
                     KEY_LEFT_ARROW => {
                         delegate.step(-1);
                         return std::ptr::null_mut();
@@ -361,15 +400,22 @@ impl AppDelegate {
                         return std::ptr::null_mut();
                     }
                     _ => {}
-                }
+                },
+                _ => {}
             }
             event.as_ptr()
         });
         let monitor = unsafe {
-            NSEvent::addLocalMonitorForEventsMatchingMask_handler(NSEventMask::KeyDown, &block)
+            NSEvent::addLocalMonitorForEventsMatchingMask_handler(NSEventMask::KeyDown
+                    | NSEventMask::ScrollWheel
+                    | NSEventMask::LeftMouseDown
+                    | NSEventMask::LeftMouseDragged
+                    | NSEventMask::LeftMouseUp,
+                &block,
+            )
         };
         if let Some(monitor) = monitor {
-            let _ = self.ivars().key_monitor.set(monitor);
+            let _ = self.ivars().event_monitor.set(monitor);
         }
     }
 
@@ -411,6 +457,17 @@ impl AppDelegate {
         self.ivars().sticky_fit.set(true);
         self.zoom_to_fit();
         viewer.window.makeKeyAndOrderFront(None);
+        self.ensure_folder_access();
+    }
+
+    /// Ask for the current image's folder up front (sandboxed, only the file itself is readable
+    /// at first), so "n of N" is known now and not on the first arrow key.
+    fn ensure_folder_access(&self) {
+        let Some(current) = self.ivars().current.borrow().clone() else { return };
+        let Some(dir) = current.parent() else { return };
+        if !access::can_list(dir) && access::request(dir, self.mtm()) {
+            self.update_position(&current);
+        }
     }
 
     /// Move `delta` images through the current folder, in the chosen order.
@@ -452,16 +509,21 @@ impl AppDelegate {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         viewer.window.setTitle(&NSString::from_str(&name));
         viewer.window.setRepresentedURL(Some(&url));
+        self.update_position(path);
+
+        *self.ivars().current.borrow_mut() = Some(path.to_path_buf());
+        true
+    }
+
+    /// List the folder and show "n of N" in the window subtitle.
+    fn update_position(&self, path: &Path) {
         let siblings = folder::sibling_images(path, self.ivars().listing.get());
         let subtitle = match siblings.iter().position(|p| p == path) {
             Some(index) => format!("{} of {}", index + 1, siblings.len()),
             None => String::new(),
         };
-        viewer.window.setSubtitle(&NSString::from_str(&subtitle));
+        self.viewer().window.setSubtitle(&NSString::from_str(&subtitle));
         *self.ivars().siblings.borrow_mut() = siblings;
-
-        *self.ivars().current.borrow_mut() = Some(path.to_path_buf());
-        true
     }
 
     fn size_window_to_image(&self) {
@@ -502,24 +564,101 @@ impl AppDelegate {
         self.set_magnification(viewer.scroll_view.magnification() * factor);
     }
 
+    /// Start dragging the image when the press lands on it (or on the background around it,
+    /// not on a scroller or the status bar) and part of it is out of view.
+    fn begin_pan(&self, event: &NSEvent) -> bool {
+        let Some(viewer) = self.ivars().viewer.get() else { return false };
+        let clip = viewer.scroll_view.contentView();
+        let Some(content) = viewer.window.contentView() else { return false };
+        let Some(frame_view) = (unsafe { content.superview() }) else { return false };
+        let Some(hit) = content.hitTest(frame_view.convertPoint_fromView(event.locationInWindow(), None)) else {
+            return false;
+        };
+        let hit: *const NSView = Retained::as_ptr(&hit);
+        let on_image = std::ptr::eq(hit, Retained::as_ptr(&viewer.image_view).cast::<NSView>())
+            || std::ptr::eq(hit, Retained::as_ptr(&clip).cast::<NSView>());
+        let Ok(clip) = clip.downcast::<CenteringClipView>() else { return false };
+        if !on_image || !clip.is_pannable() {
+            return false;
+        }
+        self.ivars().panning.set(true);
+        NSCursor::closedHandCursor().set();
+        true
+    }
+
+    fn pan(&self, event: &NSEvent) {
+        let Some(viewer) = self.ivars().viewer.get() else { return };
+        let clip = viewer.scroll_view.contentView();
+        let scale = viewer.scroll_view.magnification();
+        let bounds = clip.bounds();
+        // The image follows the pointer, so the viewport moves the other way.
+        let dx = -event.deltaX() / scale;
+        let dy = if clip.isFlipped() { -event.deltaY() } else { event.deltaY() } / scale;
+        let origin = NSPoint::new(bounds.origin.x + dx, bounds.origin.y + dy);
+        clip.setBoundsOrigin(clip.constrainBoundsRect(NSRect::new(origin, bounds.size)).origin);
+        viewer.scroll_view.reflectScrolledClipView(&clip);
+        NSCursor::closedHandCursor().set();
+    }
+
+    fn end_pan(&self) {
+        self.ivars().panning.set(false);
+        if let Some(viewer) = self.ivars().viewer.get() {
+            viewer.window.invalidateCursorRectsForView(&viewer.scroll_view.contentView());
+            NSCursor::openHandCursor().set();
+        }
+    }
+
+    /// ⌘ or ⌥ + scroll: zoom around the pointer.
+    fn zoom_with_scroll(&self, event: &NSEvent) {
+        let Some(viewer) = self.ivars().viewer.get() else { return };
+        // Momentum after the fingers lift would keep zooming.
+        if !event.momentumPhase().is_empty() {
+            return;
+        }
+        let per_unit = if event.hasPreciseScrollingDeltas() { SCROLL_ZOOM_PRECISE } else { SCROLL_ZOOM_LINES };
+        let factor = (event.scrollingDeltaY() * per_unit).exp();
+        self.ivars().sticky_fit.set(false);
+        self.set_magnification_at(viewer.scroll_view.magnification() * factor, Some(event.locationInWindow()));
+    }
+
     fn set_magnification(&self, magnification: f64) {
+        self.set_magnification_at(magnification, None);
+    }
+
+    /// Zoom keeping the point under `cursor` (window coordinates) in place, or the
+    /// centre of the viewport when there is none.
+    fn set_magnification_at(&self, magnification: f64, cursor: Option<NSPoint>) {
         let Some(viewer) = self.ivars().viewer.get() else { return };
         let magnification = magnification.clamp(MIN_MAGNIFICATION, MAX_MAGNIFICATION);
         let clip = viewer.scroll_view.contentView();
         let visible = clip.bounds();
-        let centre = NSPoint::new(
-            visible.origin.x + visible.size.width / 2.0,
-            visible.origin.y + visible.size.height / 2.0,
-        );
-        viewer.scroll_view.setMagnification_centeredAtPoint(magnification, centre);
-        // Re-run the centring constraint after the magnification change.
+        let fixed = match cursor {
+            Some(point) => clip.convertPoint_fromView(point, None),
+            None => NSPoint::new(
+                visible.origin.x + visible.size.width / 2.0,
+                visible.origin.y + visible.size.height / 2.0,
+            ),
+        };
+        // Where `fixed` sits within the visible area, to put it back after the zoom.
+        let fraction_x = (fixed.x - visible.origin.x) / visible.size.width.max(f64::EPSILON);
+        let fraction_y = (fixed.y - visible.origin.y) / visible.size.height.max(f64::EPSILON);
+        viewer.scroll_view.setMagnification_centeredAtPoint(magnification, fixed);
         let bounds = clip.bounds();
-        clip.setBoundsOrigin(clip.constrainBoundsRect(bounds).origin);
+        let origin = NSPoint::new(
+            fixed.x - fraction_x * bounds.size.width,
+            fixed.y - fraction_y * bounds.size.height,
+        );
+        // Also re-runs the centring constraint after the magnification change.
+        let constrained = clip.constrainBoundsRect(NSRect::new(origin, bounds.size));
+        clip.setBoundsOrigin(constrained.origin);
+        viewer.scroll_view.reflectScrolledClipView(&clip);
         self.update_zoom_label();
     }
 
     fn update_zoom_label(&self) {
         let Some(viewer) = self.ivars().viewer.get() else { return };
+        // Whether the image can be dragged (the open hand) depends on the zoom.
+        viewer.window.invalidateCursorRectsForView(&viewer.scroll_view.contentView());
         let percent = (viewer.scroll_view.magnification() * 100.0).round();
         viewer.zoom_label.setStringValue(&NSString::from_str(&format!("{percent}%")));
     }
@@ -659,6 +798,8 @@ fn main() {
         unsafe { app.setApplicationIconImage(Some(&icon)) };
     }
 
+    // Before any file is opened: Finder's "Open With" arrives ahead of applicationDidFinishLaunching.
+    access::restore();
     let delegate = AppDelegate::new(mtm, folder::Listing::from_args(std::env::args_os().skip(1)));
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     app.run();

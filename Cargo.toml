@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWindow", "NSView", "NSScrollView", "NSClipView", "NSImageView", "NSImage", "NSControl", "NSResponder", "NSEvent", "NSMenu", "NSMenuItem", "NSOpenPanel", "NSSavePanel", "NSPanel", "NSRunningApplication", "NSScreen", "NSGraphics", "NSColor", "NSImageCell", "NSCell", "NSPasteboard", "NSImageRep", "NSTextField", "NSText", "NSFont", "NSFontDescriptor", "NSParagraphStyle", "NSAlert", "NSButton", "NSWorkspace", "block2", "objc2-uniform-type-identifiers"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWindow", "NSView", "NSScrollView", "NSClipView", "NSCursor", "NSImageView", "NSImage", "NSControl", "NSResponder", "NSEvent", "NSMenu", "NSMenuItem", "NSOpenPanel", "NSSavePanel", "NSPanel", "NSRunningApplication", "NSScreen", "NSGraphics", "NSColor", "NSImageCell", "NSCell", "NSPasteboard", "NSImageRep", "NSTextField", "NSText", "NSFont", "NSFontDescriptor", "NSParagraphStyle", "NSAlert", "NSButton", "NSWorkspace", "block2", "objc2-uniform-type-identifiers"] }
 objc2-foundation = { version = "0.3", features = ["NSString", "NSURL", "NSArray", "NSNotification", "NSGeometry", "NSObject", "NSEnumerator", "NSValue", "NSObjCRuntime", "NSProcessInfo", "NSData", "NSError", "NSUserDefaults", "NSByteCountFormatter", "NSFormatter", "NSURLSession", "NSURLRequest", "NSURLResponse", "NSOperation", "NSDate", "block2"] }
 serde_json = "1"
 objc2-uniform-type-identifiers = { version = "0.3", features = ["UTType", "UTCoreTypes"] }

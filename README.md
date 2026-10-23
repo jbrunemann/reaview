@@ -6,7 +6,7 @@ A fast, native macOS image viewer in the spirit of Preview.app, written in Rust.
 
 - **← / →** step through every image in the same folder (Finder order)
 - Opens anything macOS can decode: JPEG, PNG, HEIC, RAW, WebP, AVIF, GIF, TIFF, …
-- Zoom to fit (⌘9), actual size (⌘0), zoom in/out (⌘+ / ⌘−), pinch to zoom
+- Zoom to fit (⌘9), actual size (⌘0), zoom in/out (⌘+ / ⌘−), pinch or ⌘/⌥ + scroll to zoom, drag to move a zoomed image
 - Status bar with file type, pixel size, file size and zoom percentage
 - Copy the image (⌘C) or its full path (⌥⌘C), also from the right-click menu
 - **Reaview > Check for Updates…** asks GitHub for the latest release, only when you choose it

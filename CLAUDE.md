@@ -32,7 +32,8 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
   ad-hoc signed with the hardened runtime and the App Sandbox (read-only user-selected files,
   app-scope bookmarks).
 - `src/access.rs`: sandbox folder access. A sandboxed app can read only the file it was opened on,
-  so the first ← / → in a folder it can't list shows an Open panel asking for that folder; the grant
+  so right after an image is opened (its window already showing it) an Open panel asks for the folder when
+  it can't be listed, which fills in "n of N"; ← / → asks again if that was declined. The grant
   is stored as a security-scoped bookmark in user defaults and re-activated at launch.
 - `src/update.rs`: "Check for Updates…" (app menu). Asks GitHub's latest-release JSON (or a plain
   `{"version","url"}` file) through `NSURLSession`, compares versions (`Version`, ported from macsplorer's
@@ -48,6 +49,13 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
 
 - Arrow keys are caught by a local `NSEvent` key-down monitor, only for the viewer window and only
   without modifiers. They take priority over scrolling when zoomed in.
+- ⌘ or ⌥ + scroll zooms around the pointer. The same local monitor catches scroll-wheel events
+  (only with exactly one of those modifiers, momentum events ignored) and turns the delta into an
+  exponential factor; like any manual zoom it ends sticky fit.
+- Dragging with the mouse moves the image while part of it is out of view (`CenteringClipView::is_pannable`).
+  The same monitor takes the left-button down/drag/up, but only when a hit test lands on the image view
+  or the clip view, so scrollers and the status bar keep their clicks. The clip view's cursor rect gives
+  the open hand, invalidated whenever the zoom changes; a closed hand shows while dragging.
 - Listing: Finder name order, no hidden files, by default. `--sort name|size|date` (modification date)
   with `--asc` / `--desc` changes the order, `--plain` compares names without numbers by value
   (`localizedCaseInsensitiveCompare:`) and `--hidden` includes dot files, so another app (macsplorer)
@@ -59,7 +67,7 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
 - Decoding is `NSImage` (ImageIO), so every format Preview opens works.
 - Zoom is `NSScrollView` magnification. "Sticky zoom to fit" (as in Preview): the image refits on
   window resize until the user zooms manually. Fit never enlarges past 100%.
-- Shortcuts: ⌘0 actual size, ⌘9 fit, ⌘+ / ⌘− zoom, ⌘C copy image, ⌥⌘C copy path, ⌘O open.
+- Shortcuts: ⌘0 actual size, ⌘9 fit, ⌘+ / ⌘− zoom, ⌘ or ⌥ + scroll zoom at the pointer, ⌘C copy image, ⌥⌘C copy path, ⌘O open.
   Right-click menu on the image (and scroll view): Copy Image, Copy Path.
 - Window title is the file name, subtitle "n of N". The bottom status bar uses the window's content
   border; the zoom label updates from `NSViewBoundsDidChangeNotification` on the clip view, which
