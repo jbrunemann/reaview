@@ -54,8 +54,9 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
   exponential factor; like any manual zoom it ends sticky fit.
 - Dragging with the mouse moves the image while part of it is out of view (`CenteringClipView::is_pannable`).
   The same monitor takes the left-button down/drag/up, but only when a hit test lands on the image view
-  or the clip view, so scrollers and the status bar keep their clicks. The clip view's cursor rect gives
-  the open hand, invalidated whenever the zoom changes; a closed hand shows while dragging.
+  or the clip view, so scrollers and the status bar keep their clicks. The pointer stays the normal arrow
+  and becomes the four-arrow move cursor only while dragging (`move_cursor`: the private
+  `+[NSCursor _moveCursor]`, closed hand if it is ever missing).
 - Listing: Finder name order, no hidden files, by default. `--sort name|size|date` (modification date)
   with `--asc` / `--desc` changes the order, `--plain` compares names without numbers by value
   (`localizedCaseInsensitiveCompare:`) and `--hidden` includes dot files, so another app (macsplorer)

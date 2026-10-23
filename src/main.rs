@@ -18,7 +18,7 @@ use std::ptr::NonNull;
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
-use objc2::{define_class, msg_send, sel, AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
+use objc2::{define_class, msg_send, sel, AllocAnyThread, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSWorkspace, NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSApplicationDelegate, NSBackingStoreType,
     NSBeep, NSClipView, NSColor, NSCursor, NSEvent, NSEventMask, NSEventModifierFlags, NSEventType, NSFont,
@@ -55,14 +55,6 @@ define_class!(
     struct CenteringClipView;
 
     impl CenteringClipView {
-        // An open hand while the image is bigger than the window, i.e. can be dragged.
-        #[unsafe(method(resetCursorRects))]
-        fn reset_cursor_rects(&self) {
-            if self.is_pannable() {
-                self.addCursorRect_cursor(self.visibleRect(), &NSCursor::openHandCursor());
-            }
-        }
-
         #[unsafe(method(constrainBoundsRect:))]
         fn constrain_bounds_rect(&self, proposed: NSRect) -> NSRect {
             let mut rect: NSRect = unsafe { msg_send![super(self), constrainBoundsRect: proposed] };
@@ -582,7 +574,7 @@ impl AppDelegate {
             return false;
         }
         self.ivars().panning.set(true);
-        NSCursor::closedHandCursor().set();
+        move_cursor().set();
         true
     }
 
@@ -597,15 +589,12 @@ impl AppDelegate {
         let origin = NSPoint::new(bounds.origin.x + dx, bounds.origin.y + dy);
         clip.setBoundsOrigin(clip.constrainBoundsRect(NSRect::new(origin, bounds.size)).origin);
         viewer.scroll_view.reflectScrolledClipView(&clip);
-        NSCursor::closedHandCursor().set();
+        move_cursor().set();
     }
 
     fn end_pan(&self) {
         self.ivars().panning.set(false);
-        if let Some(viewer) = self.ivars().viewer.get() {
-            viewer.window.invalidateCursorRectsForView(&viewer.scroll_view.contentView());
-            NSCursor::openHandCursor().set();
-        }
+        NSCursor::arrowCursor().set();
     }
 
     /// ⌘ or ⌥ + scroll: zoom around the pointer.
@@ -657,11 +646,18 @@ impl AppDelegate {
 
     fn update_zoom_label(&self) {
         let Some(viewer) = self.ivars().viewer.get() else { return };
-        // Whether the image can be dragged (the open hand) depends on the zoom.
-        viewer.window.invalidateCursorRectsForView(&viewer.scroll_view.contentView());
         let percent = (viewer.scroll_view.magnification() * 100.0).round();
         viewer.zoom_label.setStringValue(&NSString::from_str(&format!("{percent}%")));
     }
+}
+
+/// The four-arrow "move" cursor. AppKit has it only as the private `+[NSCursor _moveCursor]`
+/// (what Finder and Preview use); without it the closed hand stands in.
+fn move_cursor() -> Retained<NSCursor> {
+    let class = NSCursor::class();
+    let available: bool = unsafe { msg_send![class, respondsToSelector: sel!(_moveCursor)] };
+    let private: Option<Retained<NSCursor>> = if available { unsafe { msg_send![class, _moveCursor] } } else { None };
+    private.unwrap_or_else(NSCursor::closedHandCursor)
 }
 
 #[allow(non_snake_case)]
