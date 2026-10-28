@@ -47,11 +47,13 @@ const SCROLL_ZOOM_LINES: f64 = 0.1;
 const STATUS_BAR_HEIGHT: f64 = 24.0;
 
 // A clip view that centres the document when it is smaller than the viewport,
-// the way Preview shows a small image in the middle of the window.
+// the way Preview shows a small image in the middle of the window. The user can drag
+// such an image off-centre (`place`); that offset is kept until the image is refitted.
 define_class!(
     #[unsafe(super(NSClipView, objc2_app_kit::NSView, objc2_app_kit::NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "RVCenteringClipView"]
+    #[ivars = Cell<NSPoint>]
     struct CenteringClipView;
 
     impl CenteringClipView {
@@ -60,11 +62,14 @@ define_class!(
             let mut rect: NSRect = unsafe { msg_send![super(self), constrainBoundsRect: proposed] };
             if let Some(document) = self.documentView() {
                 let frame = document.frame();
+                let offset = self.ivars().get();
                 if rect.size.width > frame.size.width {
-                    rect.origin.x = (frame.size.width - rect.size.width) / 2.0;
+                    rect.origin.x = (frame.size.width - rect.size.width) / 2.0
+                        + clamp_offset(offset.x, rect.size.width, frame.size.width);
                 }
                 if rect.size.height > frame.size.height {
-                    rect.origin.y = (frame.size.height - rect.size.height) / 2.0;
+                    rect.origin.y = (frame.size.height - rect.size.height) / 2.0
+                        + clamp_offset(offset.y, rect.size.height, frame.size.height);
                 }
             }
             rect
@@ -72,17 +77,38 @@ define_class!(
     }
 );
 
+/// Keep at least a tenth of the viewport (or the whole document, if smaller) covered by the document.
+fn clamp_offset(offset: f64, viewport: f64, document: f64) -> f64 {
+    let limit = (viewport + document) / 2.0 - document.min(viewport * 0.1);
+    offset.clamp(-limit, limit)
+}
+
 impl CenteringClipView {
-    /// Whether part of the document is outside the visible area.
-    fn is_pannable(&self) -> bool {
-        let Some(document) = self.documentView() else { return false };
-        let size = document.frame().size;
-        let visible = self.bounds().size;
-        size.width > visible.width + 0.5 || size.height > visible.height + 0.5
+    /// Show `proposed`, remembering how far it is from centred on the axes where the document
+    /// is smaller than the viewport. Returns the origin actually used.
+    fn place(&self, proposed: NSRect) -> NSPoint {
+        if let Some(document) = self.documentView() {
+            let frame = document.frame();
+            let mut offset = self.ivars().get();
+            if proposed.size.width > frame.size.width {
+                offset.x = proposed.origin.x - (frame.size.width - proposed.size.width) / 2.0;
+            }
+            if proposed.size.height > frame.size.height {
+                offset.y = proposed.origin.y - (frame.size.height - proposed.size.height) / 2.0;
+            }
+            self.ivars().set(offset);
+        }
+        self.constrainBoundsRect(proposed).origin
+    }
+
+    /// Centre the document again.
+    fn reset_offset(&self) {
+        self.ivars().set(NSPoint::new(0.0, 0.0));
     }
 
     fn new(mtm: MainThreadMarker) -> Retained<Self> {
-        unsafe { msg_send![Self::alloc(mtm), init] }
+        let this = Self::alloc(mtm).set_ivars(Cell::new(NSPoint::new(0.0, 0.0)));
+        unsafe { msg_send![super(this), init] }
     }
 }
 
@@ -232,6 +258,7 @@ define_class!(
         #[unsafe(method(doZoomToFit:))]
         fn do_zoom_to_fit(&self, _sender: Option<&AnyObject>) {
             self.ivars().sticky_fit.set(true);
+            self.reset_offset();
             self.zoom_to_fit();
         }
 
@@ -497,6 +524,7 @@ impl AppDelegate {
         viewer.info_label.setStringValue(&NSString::from_str(&info::describe(path, &image)));
         viewer.image_view.setFrameSize(size);
         self.ivars().image_size.set(size);
+        self.reset_offset();
 
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         viewer.window.setTitle(&NSString::from_str(&name));
@@ -535,6 +563,14 @@ impl AppDelegate {
         viewer.window.setContentSize(content);
     }
 
+    /// Put an image that was dragged off-centre back in the middle.
+    fn reset_offset(&self) {
+        let Some(viewer) = self.ivars().viewer.get() else { return };
+        if let Ok(clip) = viewer.scroll_view.contentView().downcast::<CenteringClipView>() {
+            clip.reset_offset();
+        }
+    }
+
     fn zoom_to_fit(&self) {
         let Some(viewer) = self.ivars().viewer.get() else { return };
         let image = self.ivars().image_size.get();
@@ -557,7 +593,8 @@ impl AppDelegate {
     }
 
     /// Start dragging the image when the press lands on it (or on the background around it,
-    /// not on a scroller or the status bar) and part of it is out of view.
+    /// not on a scroller or the status bar). Zoomed out it moves off-centre, so the next zoom
+    /// happens around the part of the image that was moved to the middle.
     fn begin_pan(&self, event: &NSEvent) -> bool {
         let Some(viewer) = self.ivars().viewer.get() else { return false };
         let clip = viewer.scroll_view.contentView();
@@ -569,8 +606,7 @@ impl AppDelegate {
         let hit: *const NSView = Retained::as_ptr(&hit);
         let on_image = std::ptr::eq(hit, Retained::as_ptr(&viewer.image_view).cast::<NSView>())
             || std::ptr::eq(hit, Retained::as_ptr(&clip).cast::<NSView>());
-        let Ok(clip) = clip.downcast::<CenteringClipView>() else { return false };
-        if !on_image || !clip.is_pannable() {
+        if !on_image {
             return false;
         }
         self.ivars().panning.set(true);
@@ -587,7 +623,8 @@ impl AppDelegate {
         let dx = -event.deltaX() / scale;
         let dy = if clip.isFlipped() { -event.deltaY() } else { event.deltaY() } / scale;
         let origin = NSPoint::new(bounds.origin.x + dx, bounds.origin.y + dy);
-        clip.setBoundsOrigin(clip.constrainBoundsRect(NSRect::new(origin, bounds.size)).origin);
+        let Ok(clip) = clip.downcast::<CenteringClipView>() else { return };
+        clip.setBoundsOrigin(clip.place(NSRect::new(origin, bounds.size)));
         viewer.scroll_view.reflectScrolledClipView(&clip);
         move_cursor().set();
     }
@@ -638,8 +675,11 @@ impl AppDelegate {
             fixed.y - fraction_y * bounds.size.height,
         );
         // Also re-runs the centring constraint after the magnification change.
-        let constrained = clip.constrainBoundsRect(NSRect::new(origin, bounds.size));
-        clip.setBoundsOrigin(constrained.origin);
+        match clip.downcast::<CenteringClipView>() {
+            Ok(clip) => clip.setBoundsOrigin(clip.place(NSRect::new(origin, bounds.size))),
+            Err(clip) => clip.setBoundsOrigin(clip.constrainBoundsRect(NSRect::new(origin, bounds.size)).origin),
+        }
+        let clip = viewer.scroll_view.contentView();
         viewer.scroll_view.reflectScrolledClipView(&clip);
         self.update_zoom_label();
     }

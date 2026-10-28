@@ -52,7 +52,10 @@ so `sips -z 1024 1024 assets/AppIcon.png`, then make an `.iconset` with sips (16
 - ⌘ or ⌥ + scroll zooms around the pointer. The same local monitor catches scroll-wheel events
   (only with exactly one of those modifiers, momentum events ignored) and turns the delta into an
   exponential factor; like any manual zoom it ends sticky fit.
-- Dragging with the mouse moves the image while part of it is out of view (`CenteringClipView::is_pannable`).
+- Dragging with the mouse moves the image, also when it is smaller than the window, so the user picks
+  where the next zoom happens (⌘+ / ⌘− zoom around the viewport centre). A small image's distance from
+  centre is kept in `CenteringClipView` (`place` stores it, `constrainBoundsRect:` applies it, at least a
+  tenth of the viewport stays covered) and is reset by loading another image and by ⌘9.
   The same monitor takes the left-button down/drag/up, but only when a hit test lands on the image view
   or the clip view, so scrollers and the status bar keep their clicks. The pointer stays the normal arrow
   and becomes the four-arrow move cursor only while dragging (`move_cursor`: the private
